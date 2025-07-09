@@ -1,0 +1,91 @@
+version: '3.8'
+
+services:
+  database:
+    container_name: mysql
+    image: mysql/mysql-server:8.0.32
+    ports:
+      - "3306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_USER=root
+      - MYSQL_PASSWORD=root
+      - MYSQL_DATABASE=scadalts
+    volumes:
+      - db_data:/var/lib/mysql:rw
+      - db_conf:/etc/mysql:ro
+    command: --log_bin_trust_function_creators=1
+    networks:
+      vlan90:
+        ipv4_address: 192.168.90.5
+
+  plc:
+    platform: linux/amd64
+    image: tuttas/openplc_v3
+    container_name: plc
+    ports:
+      - "8000:8080"
+      - "502:502"
+      - "20000:20000"
+      - "44818:44818"
+    volumes:
+      - plc_data:/home/openplc/OpenPLC_v3/pstorage
+    networks:
+      vlan71:
+        ipv4_address: 192.168.71.10
+
+  hmi:
+    image: scadalts/scadalts:latest
+    container_name: hmi
+    depends_on:
+      - database
+    ports:
+      - "8081:8080"
+    networks:
+      vlan90:
+        ipv4_address: 192.168.90.10
+    volumes:
+      - scadalts_data:/opt/scadalts/db
+      - tomcat_logs:/usr/local/tomcat/logs:rw
+    environment:
+      - CATALINA_OPTS=-Xmx2G -Xms2G
+      - TZ=Europe/Paris
+    command:
+      - /usr/bin/wait-for-it
+      - --host=database
+      - --port=3306
+      - --timeout=30
+      - --strict
+      - --
+      - /usr/local/tomcat/bin/catalina.sh
+      - run
+    links:
+      - database
+
+volumes:
+  scadalts_data:
+  db_data:
+  db_conf:
+  tomcat_logs:
+  plc_data:
+
+networks:
+  vlan71:
+    driver: macvlan
+    driver_opts:
+      parent: eth0
+    ipam:
+      config:
+        - subnet: 192.168.71.0/24
+          gateway: 192.168.71.1
+          ip_range: 192.168.71.10/32
+
+  vlan90:
+    driver: macvlan
+    driver_opts:
+      parent: eth0
+    ipam:
+      config:
+        - subnet: 192.168.90.0/24
+          gateway: 192.168.90.1
+          ip_range: 192.168.90.10/32
