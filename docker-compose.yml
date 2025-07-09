@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  router:
+    image: alpine:latest
+    container_name: router
+    command: >
+      sh -c "apk add --no-cache iproute2 iputils && \
+             ip link set eth0 up && \
+             ip addr add 192.168.71.1/24 dev eth0 && \
+             ip link set eth1 up && \
+             ip addr add 192.168.90.1/24 dev eth1 && \
+             sysctl -w net.ipv4.ip_forward=1 && \
+             tail -f /dev/null"
+    networks:
+      vlan71:
+      vlan90:
+    privileged: true
+
+  database:
+    container_name: mysql
+    image: mysql/mysql-server:8.0.32
+    ports:
+      - "3306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_USER=root
+      - MYSQL_PASSWORD=root
+      - MYSQL_DATABASE=scadalts
+    volumes:
+      - db_data:/var/lib/mysql:rw
+      - db_conf:/etc/mysql:ro
+    command: --log_bin_trust_function_creators=1
+    networks:
+      vlan90:
+        ipv4_address: 192.168.90.5
+
+  plc:
+    platform: linux/amd64
+    image: tuttas/openplc_v3
+    container_name: plc
+    ports:
+      - "8000:8080"
+    networks:
+      vlan71:
+        ipv4_address: 192.168.71.10
+
+  hmi:
+    image: scadalts/scadalts:latest
+    container_name: hmi
+    depends_on:
+      - database
+    ports:
+      - "8081:8080"
+    networks:
+      vlan90:
+        ipv4_address: 192.168.90.10
+    volumes:
+      - scadalts_data:/opt/scadalts/db
+      - tomcat_logs:/usr/local/tomcat/logs:rw
+    environment:
+      - CATALINA_OPTS=-Xmx2G -Xms2G
+      - TZ=Europe/Paris
+    command:
+      - /usr/bin/wait-for-it
+      - --host=database
+      - --port=3306
+      - --timeout=30
+      - --strict
+      - --
+      - /usr/local/tomcat/bin/catalina.sh
+      - run
+    links:
+      - database
+
+volumes:
+  scadalts_data:
+  db_data:
+  db_conf:
+  tomcat_logs:
+
+networks:
+  vlan71:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.71.0/24
+          gateway: 192.168.71.1
+
+  vlan90:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.90.0/24
+          gateway: 192.168.90.1
